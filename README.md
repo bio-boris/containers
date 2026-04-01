@@ -106,6 +106,82 @@ This script demonstrates the core building blocks Docker is built on, but Docker
 | Root = host root | Yes | No (remapped) | No |
 | Kernel shared with host | Yes | Yes | No |
 
+### Adding Kubernetes to the comparison
+
+| Feature | This script | Docker | Kubernetes | VM |
+|---|---|---|---|---|
+| Network isolation | Yes (netns) | Yes | Yes | Yes |
+| PID isolation | No | Yes | Yes | Yes |
+| Filesystem isolation | No | Yes (overlay) | Yes | Yes |
+| CPU/memory limits | Yes (cgroup v2) | Yes | Yes (requests/limits) | Yes |
+| Capability dropping | No | Yes | Yes | N/A |
+| Seccomp filtering | No | Yes | Yes | N/A |
+| User namespace | No | Optional | Optional | Yes |
+| Root = host root | Yes | No | No | No |
+| Kernel shared with host | Yes | Yes | Yes | No |
+| Network policies | No | No | Yes (NetworkPolicy) | Via firewall |
+| RBAC | No | No | Yes | No |
+| Secret management | No | Basic | Yes (Secrets API) | No |
+| Multi-node | No | No | Yes | Yes |
+
+Kubernetes adds controls Docker doesn't have natively — NetworkPolicy enforces what containers can talk to on the network, RBAC controls who can deploy and modify containers, and Pod Security Standards enforce seccomp and capability dropping cluster-wide.
+
+However, a default unhardened Kubernetes cluster can be more dangerous than plain Docker:
+- API server may be exposed
+- No NetworkPolicy enforced by default — all pods can talk to all pods
+- Default service account permissions are too broad
+- Pod Security Standards not enforced by default
+- etcd not encrypted at rest by default
+
+CIS benchmarks exist specifically because the defaults are not safe for production.
+
+### Security ranking
+
+**By isolation (technical):**
+```
+VM
+> Kubernetes (CIS hardened, production)
+> MicroK8s (CIS plugin + Calico NetworkPolicy)
+> MicroK8s (CIS plugin, default CNI)
+> Docker (CIS hardened)
+> Kubernetes (default)
+> Docker (default)
+> This script
+```
+
+**By real-world misconfiguration risk:**
+```
+VM
+> Kubernetes (CIS hardened, production)
+> MicroK8s (CIS plugin + Calico NetworkPolicy)
+> MicroK8s (CIS plugin, default CNI)
+> Docker (CIS hardened)
+> This script
+> Docker (default)
+> Kubernetes (default)
+```
+
+Default Kubernetes sits at the bottom of the second list because it provides the illusion of enterprise security while having more attack surface than plain Docker. MicroK8s with the CIS hardening plugin is a strong option — it automates the CIS benchmark remediations, supports multi-node clustering, and is close to a production CIS-hardened cluster. The remaining gaps are mainly embedded etcd vs a dedicated etcd cluster and any manual CIS remediations the plugin doesn't cover.
+
+### A container is just a process
+
+At the kernel level a container or pod is just a process (or group of processes). The kernel scheduler, OOM killer, and process table treat them like any other process. There is no special kernel object called a "container" — it is just:
+
+- A process with certain **namespaces** applied (restricting its view of the system)
+- A process assigned to a **cgroup** (limiting its resources)
+- Optionally a process with a **seccomp filter** and reduced **capabilities**
+
+All of those are standard Linux kernel features that predate Docker by years. This is exactly what `http.sh` proves — a "container" is built with two shell commands (`ip netns add` + `mkdir /sys/fs/cgroup/...`) and a regular `python3` process. No container runtime required.
+
+The implications:
+
+- `ps aux` on the host shows every container process
+- The kernel OOM killer can kill a container process just like any other
+- `strace`, `perf`, `lsof` all work on container processes from the host
+- CrowdStrike sees them because it hooks the kernel, not Docker
+
+The "magic" of Docker and Kubernetes is not in the kernel — it is in the tooling that sets up namespaces, cgroups, overlay filesystems, and networking consistently and repeatably. The kernel itself has no idea what a container is.
+
 ### Why IT policies often allow VMs but not Docker
 
 The key concern is **network access**. Code running in a container — whether Docker or this script — can reach anything the host can reach: internal services, infrastructure, other machines on the network.
