@@ -2,18 +2,29 @@
 
 Run multiple isolated FastAPI servers using only Linux kernel primitives — no Docker, no Kubernetes.
 
-Each "container" gets its own network namespace, a virtual ethernet connection to a shared bridge, and cgroup v2 resource limits (CPU + memory).
+Each "container" gets its own network namespace, a virtual ethernet connection to a shared bridge, an overlay filesystem with its own rootfs (Debian or Alpine), and cgroup v2 resource limits (CPU + memory).
 
 ## How it works
 
 ```
 Host bridge (br-fastapi) 10.200.0.1
-  ├── veth-h1 ↔ veth-c1 → ns1  10.200.0.2:8000  (container-1)
-  ├── veth-h2 ↔ veth-c2 → ns2  10.200.0.3:8000  (container-2)
+  ├── veth-h1 ↔ veth-c1 → ns1  10.200.0.2:8000  (container-1, debian)
+  ├── veth-h2 ↔ veth-c2 → ns2  10.200.0.3:8000  (container-2, alpine)
   └── veth-hN ↔ veth-cN → nsN  10.200.0.N+1:8000
 ```
 
 Each container is isolated at the network level — it can only see its own loopback and veth interface, not the host's. The host routes traffic to each container through the bridge, the same way Docker uses `docker0`.
+
+Filesystem isolation uses overlayfs — the same mechanism Docker uses:
+
+```
+/var/lib/containers/base/debian   (read-only, shared)
+/var/lib/containers/base/alpine   (read-only, shared)
+    ↓
+per-container overlay (upperdir)  (writes isolated per container)
+    ↓
+merged view (chroot)              (what the container sees)
+```
 
 Resource limits are enforced via cgroup v2:
 - 50% CPU (quota: 50000us per 100000us period)
@@ -23,7 +34,7 @@ Resource limits are enforced via cgroup v2:
 
 - Linux with cgroup v2 (Ubuntu 22.04+)
 - Must run as root (`sudo`)
-- Python 3 (fastapi + uvicorn installed automatically)
+- Python 3, fastapi, uvicorn, debootstrap, wget (installed automatically)
 
 ## Files
 
@@ -39,17 +50,44 @@ Resource limits are enforced via cgroup v2:
 ### Start containers
 
 ```bash
-sudo bash http.sh        # start 3 (default)
-sudo bash http.sh 5      # start 5
-sudo bash http.sh 1      # start 1
+sudo bash http.sh              # 1 debian + 1 alpine (default)
+sudo bash http.sh 2            # 2 debian + 2 alpine
+sudo bash http.sh 1 debian     # 1 debian only
+sudo bash http.sh 1 alpine     # 1 alpine only
+sudo bash http.sh 3 debian     # 3 debian only
 ```
 
 You can run the script multiple times concurrently — each run detects existing containers and starts from the next available index:
 
 ```bash
-sudo bash http.sh 1   # starts container 1
-sudo bash http.sh 1   # starts container 2
-sudo bash http.sh 1   # starts container 3
+sudo bash http.sh 1 debian   # starts container 1 (Debian)
+sudo bash http.sh 1 alpine   # starts container 2 (Alpine)
+sudo bash http.sh 1 debian   # starts container 3 (Debian)
+```
+
+### Base images
+
+These are not scratch images — they are minimal OS rootfs environments:
+
+| Image | Base | Package manager | Size |
+|---|---|---|---|
+| `debian` | Debian 12 Bookworm (via debootstrap) | apt | ~300MB |
+| `alpine` | Alpine 3.19 minirootfs | apk | ~10MB |
+
+Both have a shell, libc, and package manager. They are equivalent to `FROM debian:12-slim` and `FROM alpine:3.19` in Docker. Scratch images (empty, no OS) are not practical with Python as it requires a runtime and libc.
+
+The base rootfs for each image is built once and reused. On first run, Debian takes a few minutes. Alpine is fast as it downloads a small tarball.
+
+The rootfs persists between runs at:
+```
+/var/lib/containers/base/debian
+/var/lib/containers/base/alpine
+```
+
+Subsequent runs skip the build entirely. To force a rebuild, delete the relevant directory:
+```bash
+sudo rm -rf /var/lib/containers/base/debian
+sudo rm -rf /var/lib/containers/base/alpine
 ```
 
 ### Check containers
@@ -75,7 +113,6 @@ Press `Ctrl+C` in the `http.sh` terminal. Cleanup runs automatically — namespa
 | `GET /health` | `{"status": "ok", "container": "container-N"}` |
 
 ## Logs
-
 
 Each container writes to append-mode log files:
 
@@ -182,6 +219,40 @@ The implications:
 - CrowdStrike sees them because it hooks the kernel, not Docker
 
 The "magic" of Docker and Kubernetes is not in the kernel — it is in the tooling that sets up namespaces, cgroups, overlay filesystems, and networking consistently and repeatably. The kernel itself has no idea what a container is.
+
+### How this script compares to containerd
+
+This script is essentially a minimal containerd — just without the image layer.
+
+The full container stack looks like this:
+
+```
+Kubernetes
+    ↓
+containerd        ← manages images, snapshots, lifecycle
+    ↓
+runc              ← does exactly what this script does (namespaces, cgroups)
+    ↓
+Linux kernel
+```
+
+This script skips everything above `runc` and calls the kernel primitives directly. `runc` is essentially this script, written in Go, following the OCI spec.
+
+**What containerd does that this script doesn't:**
+- Pulls images from registries (Docker Hub, ECR, etc.)
+- Manages a local image cache
+- Sets up an overlay filesystem from image layers so each container gets its own copy of the filesystem
+- OCI runtime spec compliance
+- gRPC API so Kubernetes can talk to it
+- Container lifecycle management (start, stop, pause, restart)
+
+**What this script already does (same as containerd/runc):**
+- Creates network namespaces
+- Sets up veth pairs and bridge networking
+- Creates and assigns cgroups
+- Launches a process inside the namespace
+
+The main missing pieces are filesystem isolation and several hardening features (e.g. PID/user namespaces, capability dropping, seccomp) — processes share the host filesystem and other isolation layers are not enabled. For basic networking, cgroups, and process launch, this script behaves similarly to a low-level container runtime.
 
 ### Why IT policies often allow VMs but not Docker
 
