@@ -222,7 +222,7 @@ The "magic" of Docker and Kubernetes is not in the kernel — it is in the tooli
 
 ### How this script compares to containerd
 
-Your script is essentially a minimal containerd — just without the image layer.
+This script is essentially a minimal containerd — just without the image layer.
 
 The full container stack looks like this:
 
