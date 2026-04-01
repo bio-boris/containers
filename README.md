@@ -76,6 +76,7 @@ Press `Ctrl+C` in the `http.sh` terminal. Cleanup runs automatically — namespa
 
 ## Logs
 
+
 Each container writes to append-mode log files:
 
 ```
@@ -135,6 +136,33 @@ However, a default unhardened Kubernetes cluster can be more dangerous than plai
 
 CIS benchmarks exist specifically because the defaults are not safe for production.
 
+### Security ranking
+
+**By isolation (technical):**
+```
+VM
+> Kubernetes (CIS hardened, production)
+> MicroK8s (CIS plugin + Calico NetworkPolicy)
+> MicroK8s (CIS plugin, default CNI)
+> Docker (CIS hardened)
+> Kubernetes (default)
+> Docker (default)
+> This script
+```
+
+**By real-world misconfiguration risk:**
+```
+VM
+> Kubernetes (CIS hardened, production)
+> MicroK8s (CIS plugin + Calico NetworkPolicy)
+> MicroK8s (CIS plugin, default CNI)
+> Docker (CIS hardened)
+> This script
+> Docker (default)
+> Kubernetes (default)
+```
+
+Default Kubernetes sits at the bottom of the second list because it provides the illusion of enterprise security while having more attack surface than plain Docker. MicroK8s with the CIS hardening plugin is a strong option — it automates the CIS benchmark remediations, supports multi-node clustering, and is close to a production CIS-hardened cluster. The remaining gaps are mainly embedded etcd vs a dedicated etcd cluster and any manual CIS remediations the plugin doesn't cover.
 
 ### A container is just a process
 
