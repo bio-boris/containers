@@ -252,7 +252,7 @@ This script skips everything above `runc` and calls the kernel primitives direct
 - Creates and assigns cgroups
 - Launches a process inside the namespace
 
-The main thing missing is filesystem isolation — processes share the host filesystem. Everything else is functionally equivalent to what a real container runtime does.
+The main missing pieces are filesystem isolation and several hardening features (e.g. PID/user namespaces, capability dropping, seccomp) — processes share the host filesystem and other isolation layers are not enabled. For basic networking, cgroups, and process launch, this script behaves similarly to a low-level container runtime.
 
 ### Why IT policies often allow VMs but not Docker
 
