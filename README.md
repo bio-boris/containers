@@ -90,6 +90,35 @@ tail -f /var/log/fastapi-containers/container-1.stdout.log
 tail -f /var/log/fastapi-containers/container-*.stderr.log
 ```
 
+## Security comparison: this script vs Docker vs VM
+
+This script demonstrates the core building blocks Docker is built on, but Docker layers significant security hardening on top. Here's how they compare:
+
+| Feature | This script | Docker | VM |
+|---|---|---|---|
+| Network isolation | Yes (netns) | Yes | Yes |
+| PID isolation | No | Yes | Yes |
+| Filesystem isolation | No | Yes (overlay) | Yes |
+| CPU/memory limits | Yes (cgroup v2) | Yes | Yes |
+| Capability dropping | No | Yes | N/A |
+| Seccomp filtering | No | Yes | N/A |
+| User namespace | No | Optional | Yes |
+| Root = host root | Yes | No (remapped) | No |
+| Kernel shared with host | Yes | Yes | No |
+
+### Why IT policies often allow VMs but not Docker
+
+The key concern is **network access**. Code running in a container — whether Docker or this script — can reach anything the host can reach: internal services, infrastructure, other machines on the network.
+
+VMs are easier for IT to control at the network level because they appear as distinct machines with their own MAC/IP and can be placed in firewalled segments. Containers share the host's network stack and are harder to isolate at the infrastructure level.
+
+However, if your organisation runs CrowdStrike Falcon and Tenable/Nessus, both tools cover containers as well as the host:
+
+- **CrowdStrike** operates at the kernel level and sees all processes and network connections regardless of namespaces — containers are not hidden from it
+- **Tenable** has container scanning built in and any network traffic from a container passes through the host stack where it is visible and scannable
+
+From a monitoring perspective, code running in these containers is no more or less visible than code running directly on the host. The existing tooling covers it automatically.
+
 ## Troubleshooting
 
 **Namespace already exists**
