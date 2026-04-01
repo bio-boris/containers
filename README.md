@@ -1,4 +1,5 @@
 # DIY Containers with FastAPI
+# WARNING: ONLY RUN THIS IN A VM YOU DON'T CARE ABOUT AS THIS MAY DELETE YOUR SYSTEM
 
 Run multiple isolated FastAPI servers using only Linux kernel primitives — no Docker, no Kubernetes.
 
