@@ -1,4 +1,3 @@
-# DIY Containers with FastAPI
 
 Run multiple isolated FastAPI servers using only Linux kernel primitives — no Docker, no Kubernetes.
 
@@ -75,7 +74,6 @@ Press `Ctrl+C` in the `http.sh` terminal. Cleanup runs automatically — namespa
 | `GET /health` | `{"status": "ok", "container": "container-N"}` |
 
 ## Logs
-
 
 Each container writes to append-mode log files:
 
@@ -182,6 +180,40 @@ The implications:
 - CrowdStrike sees them because it hooks the kernel, not Docker
 
 The "magic" of Docker and Kubernetes is not in the kernel — it is in the tooling that sets up namespaces, cgroups, overlay filesystems, and networking consistently and repeatably. The kernel itself has no idea what a container is.
+
+### How this script compares to containerd
+
+Your script is essentially a minimal containerd — just without the image layer.
+
+The full container stack looks like this:
+
+```
+Kubernetes
+    ↓
+containerd        ← manages images, snapshots, lifecycle
+    ↓
+runc              ← does exactly what this script does (namespaces, cgroups)
+    ↓
+Linux kernel
+```
+
+This script skips everything above `runc` and calls the kernel primitives directly. `runc` is essentially this script, written in Go, following the OCI spec.
+
+**What containerd does that this script doesn't:**
+- Pulls images from registries (Docker Hub, ECR, etc.)
+- Manages a local image cache
+- Sets up an overlay filesystem from image layers so each container gets its own copy of the filesystem
+- OCI runtime spec compliance
+- gRPC API so Kubernetes can talk to it
+- Container lifecycle management (start, stop, pause, restart)
+
+**What this script already does (same as containerd/runc):**
+- Creates network namespaces
+- Sets up veth pairs and bridge networking
+- Creates and assigns cgroups
+- Launches a process inside the namespace
+
+The main thing missing is filesystem isolation — processes share the host filesystem. Everything else is functionally equivalent to what a real container runtime does.
 
 ### Why IT policies often allow VMs but not Docker
 
