@@ -204,20 +204,64 @@ Default Kubernetes sits at the bottom of the second list because it provides the
 
 ### A container is just a process
 
-At the kernel level a container or pod is just a process (or group of processes). The kernel scheduler, OOM killer, and process table treat them like any other process. There is no special kernel object called a "container" — it is just:
+At the kernel level a container or pod is just a process (or group of processes). The kernel scheduler, OOM killer, and process table treat them like any other process. There is no special kernel object called a "container" — it is a spectrum of isolation layers, each optional, each adding more separation from the host:
 
-- A process with certain **namespaces** applied (restricting its view of the system)
-- A process assigned to a **cgroup** (limiting its resources)
-- Optionally a process with a **seccomp filter** and reduced **capabilities**
+**Layer 1 — Resource limits** (minimum viable container)
+- A process assigned to a **cgroup** (CPU, memory, I/O limits)
 
-All of those are standard Linux kernel features that predate Docker by years. This is exactly what `http.sh` proves — a "container" is built with two shell commands (`ip netns add` + `mkdir /sys/fs/cgroup/...`) and a regular `python3` process. No container runtime required.
+**Layer 2 — Isolation** (what most people mean by "container")
+- **Namespaces** restricting the process's view of PIDs, mounts, users, network, and hostnames
 
-The implications:
+**Layer 3 — Filesystem** (what Docker/containerd add per container)
+- An **overlay filesystem** giving the container its own writable rootfs on top of a shared read-only base image
 
-- `ps aux` on the host shows every container process
+**Layer 4 — Networking** (can be skipped with `--network=host`)
+- A **network namespace** with a veth pair wired to a bridge, giving the container its own IP and routing
+
+**Layer 5 — Hardening** (what production runtimes add on top)
+- A **seccomp filter** restricting which syscalls the process can make
+- Reduced **capabilities** dropping privileges like `CAP_NET_ADMIN`, `CAP_SYS_ADMIN`
+
+**Layer 6 — Spec compliance** (what makes a runtime interoperable)
+- Conformance to the **OCI runtime spec** so any OCI-compatible tool can drive the runtime
+- Without this, nothing can orchestrate the containers
+
+**Layer 7 — Image distribution** (what makes containers portable)
+- **OCI image format** with content-addressable layer storage
+- Registry protocol for `push`/`pull`
+- Layer caching and deduplication across images
+
+**Layer 8 — Lifecycle management** (what containerd adds)
+- Start, stop, pause, restart, and health checks
+- Log drivers and streaming
+- Container state persistence across daemon restarts
+
+**Layer 9 — CRI** (what makes a runtime Kubernetes-compatible)
+- The **Container Runtime Interface** gRPC API that Kubernetes uses to schedule workloads onto a node
+- Without this, Kubernetes cannot drive the runtime
+
+**Layer 10 — Orchestration** (Kubernetes itself)
+- Scheduling across nodes
+- Service discovery and load balancing
+- Rolling updates, autoscaling, self-healing
+
+| Tool | Layers |
+|---|---|
+| This script | 1–4 |
+| `runc` | 1–6 |
+| `containerd` | 1–9 |
+| Kubernetes | 1–10 |
+
+Layers 1–5 are standard Linux kernel features that predate Docker by years — cgroups landed in Linux 2.6.24 (2008), network namespaces shortly after, and Docker didn't ship until 2013. This is exactly what `http.sh` proves: a "container" is just a process launched with a handful of standard kernel calls — a network namespace, a few veth and routing commands, an overlayfs mount, and a cgroup — no third-party runtime required. The script is itself a minimal container runtime, written in bash.
+
+Layers 6–10 are where the container ecosystem built its own protocols and APIs on top of those primitives. The OCI runtime spec, image registry protocol, CRI, and Kubernetes are all userspace software — none of it is in the kernel. That is where the real engineering work of the container ecosystem lives, and why tools like containerd and Kubernetes exist.
+
+For security and ops teams worried that containers hide from host tooling — they don't. Because a container is just a process, your existing tools see it without any special configuration:
+
+- `ps aux` on the host shows every container process — PID namespaces are one-way, the host always sees in
 - The kernel OOM killer can kill a container process just like any other
 - `strace`, `perf`, `lsof` all work on container processes from the host
-- CrowdStrike sees them because it hooks the kernel, not Docker
+- CrowdStrike sees them because its kernel sensor sits below the namespace boundary
 
 The "magic" of Docker and Kubernetes is not in the kernel — it is in the tooling that sets up namespaces, cgroups, overlay filesystems, and networking consistently and repeatably. The kernel itself has no idea what a container is.
 
