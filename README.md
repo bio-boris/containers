@@ -14,9 +14,9 @@ Host bridge (br-fastapi) 10.200.0.1
   └── veth-hN ↔ veth-cN → nsN  10.200.0.N+1:8000
 ```
 
-Each container is isolated at the network level — it can only see its own loopback and veth interface, not the host's. The host routes traffic to each container through the bridge, the same way Docker uses `docker0`.
+Each container is isolated at the network level — it can only see its own loopback and veth interface, not the host's. The host routes traffic to each container through the bridge, the same way the docker0 bridge works.
 
-Filesystem isolation uses overlayfs — the same mechanism Docker uses:
+Filesystem isolation uses overlayfs — the same mechanism container runtimes use:
 
 ```
 /var/lib/containers/base/debian   (read-only, shared)
@@ -75,7 +75,7 @@ These are not scratch images — they are minimal OS rootfs environments:
 | `debian` | Debian 12 Bookworm (via debootstrap) | apt | ~300MB |
 | `alpine` | Alpine 3.19 minirootfs | apk | ~10MB |
 
-Both have a shell, libc, and package manager. They are equivalent to `FROM debian:12-slim` and `FROM alpine:3.19` in Docker. Scratch images (empty, no OS) are not practical with Python as it requires a runtime and libc.
+Both have a shell, libc, and package manager. They are equivalent to `FROM debian:12-slim` and `FROM alpine:3.19` in a Dockerfile. Scratch images (empty, no OS) are not practical with Python as it requires a runtime and libc.
 
 The base rootfs for each image is built once and reused. On first run, Debian takes a few minutes. Alpine is fast as it downloads a small tarball.
 
@@ -131,7 +131,7 @@ tail -f /var/log/fastapi-containers/container-*.stderr.log
 
 ## Security comparison: this script vs Docker vs VM
 
-This script demonstrates the core building blocks Docker is built on, but Docker layers significant security hardening on top. Here's how they compare:
+This script demonstrates the core building blocks containers are built on, but Docker layers significant security hardening on top. Here's how they compare:
 
 | Feature | This script | Docker | VM |
 |---|---|---|---|
